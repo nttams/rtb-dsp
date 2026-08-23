@@ -1,0 +1,12 @@
+# AC-42: Prometheus datasource auto-provisioned on first boot — no manual setup, no
+# click-through wizard.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: prometheus-rtbdsp
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false

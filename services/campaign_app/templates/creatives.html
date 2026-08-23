@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Creatives{% endblock %}
+{% block content %}
+<h1>Creatives for {{ campaign.name }}</h1>
+<p><a href="/campaigns">&laquo; back to campaigns</a></p>
+<p><a href="/campaigns/{{ campaign.id }}/creatives/new">+ New creative</a></p>
+<table>
+  <tr><th>Name</th><th>Ad type</th><th>Size</th><th>Include countries</th><th>Include languages</th><th></th></tr>
+  {% for cr in creatives %}
+  <tr>
+    <td>{{ cr.name }}</td>
+    <td>{{ cr.ad_type }}</td>
+    <td>{{ cr.width }}x{{ cr.height }}</td>
+    <td>{{ cr.include_countries|join(",") }}</td>
+    <td>{{ cr.include_languages|join(",") }}</td>
+    <td>
+      <a href="/campaigns/{{ campaign.id }}/creatives/{{ cr.id }}/edit">edit</a>
+      &middot;
+      <form class="inline" method="post" action="/campaigns/{{ campaign.id }}/creatives/{{ cr.id }}/delete">
+        <button type="submit">delete</button>
+      </form>
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% endblock %}

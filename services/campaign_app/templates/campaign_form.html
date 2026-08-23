@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}{% if campaign %}Edit campaign{% else %}New campaign{% endif %}{% endblock %}
+{% block content %}
+<h1>{% if campaign %}Edit campaign{% else %}New campaign{% endif %}</h1>
+{% if error %}<p><strong>{{ error }}</strong></p>{% endif %}
+<form method="post" action="{% if campaign %}/campaigns/{{ campaign.id }}{% else %}/campaigns{% endif %}">
+  <label for="name">Name</label>
+  <input id="name" type="text" name="name" value="{{ campaign.name if campaign else '' }}" required>
+
+  <label for="status">Status</label>
+  <select id="status" name="status">
+    <option value="active" {% if campaign and campaign.status == "active" %}selected{% endif %}>active</option>
+    <option value="paused" {% if campaign and campaign.status == "paused" %}selected{% endif %}>paused</option>
+  </select>
+
+  <label for="bid_cpm">Bid CPM (USD)</label>
+  <input id="bid_cpm" type="text" name="bid_cpm" value="{{ '%.4f'|format(campaign.bid_cpm_micros / 1000000) if campaign else '' }}" required>
+
+  <label for="total_budget">Total budget (USD)</label>
+  <input id="total_budget" type="text" name="total_budget" value="{{ '%.4f'|format(campaign.total_budget_micros / 1000000) if campaign else '' }}" required>
+
+  <label for="allocated_budget">Allocation for cluster "{{ cluster_name }}" (USD)</label>
+  <input id="allocated_budget" type="text" name="allocated_budget" value="{{ '%.4f'|format(allocated_micros / 1000000) if allocated_micros is not none else '' }}" required>
+
+  <label for="include_countries">Include countries (comma-separated, empty = all)</label>
+  <input id="include_countries" type="text" name="include_countries" value="{{ campaign.include_countries|join(',') if campaign else '' }}">
+
+  <label for="exclude_countries">Exclude countries</label>
+  <input id="exclude_countries" type="text" name="exclude_countries" value="{{ campaign.exclude_countries|join(',') if campaign else '' }}">
+
+  <label for="include_languages">Include languages (comma-separated, empty = all)</label>
+  <input id="include_languages" type="text" name="include_languages" value="{{ campaign.include_languages|join(',') if campaign else '' }}">
+
+  <label for="exclude_languages">Exclude languages</label>
+  <input id="exclude_languages" type="text" name="exclude_languages" value="{{ campaign.exclude_languages|join(',') if campaign else '' }}">
+
+  <div class="actions">
+    <button type="submit">Save</button>
+  </div>
+</form>
+{% endblock %}

@@ -1,0 +1,369 @@
+---
+# TAM-68 MVP bidding-engine demo stack.
+#
+# Ordering is load-bearing (finding M19 / plan §6 Step 8): `migrate` is a one-shot init
+# service that MUST complete before engine/campaign-app/win-notifier/topup-worker start,
+# because the engine builds its campaign index from Postgres AT STARTUP. Running migrations
+# after a health wait deadlocks: health can never go green and `make demo`'s verification
+# step can never pass.
+#
+# `redis` runs with --appendonly yes on a named volume (finding B3 / R17): the redis:8
+# default is RDB snapshotting, so a restart would roll back `spent`/`reserved` to the last
+# snapshot while Postgres retains the full spend, silently re-granting spending capacity.
+#
+# Neither `prometheus` nor `grafana` is a dependency of any application service (R22): a
+# monitoring failure must never be able to block the demo.
+
+services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: rtb
+      POSTGRES_PASSWORD: rtb
+      POSTGRES_DB: rtbdsp
+    ports:
+      # Host publishing is for debugging only — services talk over the compose network.
+      # Non-default host ports so the demo does not collide with another local stack (AC-34).
+      - "${POSTGRES_HOST_PORT:-55433}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rtb -d rtbdsp"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:8
+    restart: unless-stopped
+    # finding B3 / R17: append-only persistence + a named volume. Without this a container
+    # restart rolls `spent`/`reserved` back to the last RDB snapshot while Postgres keeps
+    # the full spend — a silent, undetectable re-grant of spending capacity.
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_HOST_PORT:-56379}:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  # One-shot init service: applies migrations/*.sql in order, then exits. Every dependent
+  # service waits on `service_completed_successfully`, not `service_healthy` (finding M19) —
+  # the engine loads its campaign index from Postgres at startup, so it must never even
+  # attempt to start against a schema-less database.
+  migrate:
+    # Uses the postgres image directly (it ships psql) rather than the engine build image,
+    # so applying migrations never depends on the Rust build succeeding first.
+    image: postgres:17
+    restart: "no"
+    env_file: ../.env.example
+    environment:
+      DATABASE_URL: postgres://rtb:rtb@postgres:5432/rtbdsp
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        for f in /workspace/migrations/*.sql; do
+          echo "applying $$f"
+          psql "$$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$$f"
+        done
+    volumes:
+      - ../migrations:/workspace/migrations:ro
+
+  engine:
+    build:
+      context: ..
+      dockerfile: deploy/engine.Dockerfile
+      # Explicit: engine.Dockerfile's last stage is `toolchain` (see `rust-tools` below),
+      # and an untargeted build would pick that instead of the slim runtime image.
+      target: runtime
+    restart: unless-stopped
+    env_file: ../.env.example
+    environment:
+      DATABASE_URL: postgres://rtb:rtb@postgres:5432/rtbdsp
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "${ENGINE_HOST_PORT:-8080}:8080"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://localhost:8080/healthz"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+
+  win-notifier:
+    build:
+      context: ..
+      dockerfile: deploy/python.Dockerfile
+      # Explicit for the same reason as `engine` above: python.Dockerfile's last stage is
+      # `dev` (see `py-tools` below), not the runtime image these four services want.
+      target: base
+    restart: unless-stopped
+    command: ["win_notifier"]
+    env_file: ../.env.example
+    environment:
+      DATABASE_URL: postgres://rtb:rtb@postgres:5432/rtbdsp
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "${WIN_NOTIFIER_HOST_PORT:-8010}:8010"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request,sys; urllib.request.urlopen('http://localhost:8010/metrics').read()"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+
+  campaign-app:
+    build:
+      context: ..
+      dockerfile: deploy/python.Dockerfile
+      # Explicit for the same reason as `engine` above: python.Dockerfile's last stage is
+      # `dev` (see `py-tools` below), not the runtime image these four services want.
+      target: base
+    restart: unless-stopped
+    command: ["campaign_app"]
+    env_file: ../.env.example
+    environment:
+      DATABASE_URL: postgres://rtb:rtb@postgres:5432/rtbdsp
+      REDIS_URL: redis://redis:6379/0
+      WIN_NOTIFIER_URL: http://win-notifier:8010
+    ports:
+      - "${CAMPAIGN_APP_HOST_PORT:-8000}:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request,sys; urllib.request.urlopen('http://localhost:8000/metrics').read()"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+
+  topup-worker:
+    build:
+      context: ..
+      dockerfile: deploy/python.Dockerfile
+      # Explicit for the same reason as `engine` above: python.Dockerfile's last stage is
+      # `dev` (see `py-tools` below), not the runtime image these four services want.
+      target: base
+    restart: unless-stopped
+    command: ["topup_worker"]
+    env_file: ../.env.example
+    environment:
+      DATABASE_URL: postgres://rtb:rtb@postgres:5432/rtbdsp
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      # /healthz doubles as this worker's health surface (finding M22 / R21).
+      - "${TOPUP_WORKER_HOST_PORT:-8090}:8090"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    # This endpoint doubles as health AND metrics (finding M22, AC-40) — the topup worker's
+    # silent death is exactly the failure that makes the demo look like a filter bug, so it
+    # must be in the health-wait path the same as every other service.
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request,sys; urllib.request.urlopen('http://localhost:8090/metrics').read()"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+
+  prometheus:
+    image: prom/prometheus:v3.0.1
+    restart: unless-stopped
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - promdata:/prometheus
+    ports:
+      - "${PROMETHEUS_HOST_PORT:-9090}:9090"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:9090/-/healthy"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    # Deliberately no depends_on any application service, and no application service
+    # depends on this (R22): monitoring must never be able to block the demo.
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-rtbdsp}
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafanadata:/var/lib/grafana
+    ports:
+      - "${GRAFANA_HOST_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:3000/api/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    # No depends_on prometheus for the same reason as above (R22); the datasource is
+    # provisioned by file and Grafana will simply show it unreachable if prometheus is
+    # slow, without blocking its own health check.
+
+  mock-exchange:
+    build:
+      context: ..
+      dockerfile: deploy/python.Dockerfile
+      # Explicit for the same reason as `engine` above: python.Dockerfile's last stage is
+      # `dev` (see `py-tools` below), not the runtime image these four services want.
+      target: base
+    restart: "no"
+    command: ["mock_exchange"]
+    profiles: ["demo"]
+    env_file: ../.env.example
+    environment:
+      DATABASE_URL: postgres://rtb:rtb@postgres:5432/rtbdsp
+      ENGINE_URL: http://engine:8080
+      WIN_NOTIFIER_URL: http://win-notifier:8010
+      # No port is assigned elsewhere for this service (it is a client, not a server
+      # anything else depends on); fixed here so deploy/prometheus/prometheus.yml has a
+      # stable target (AC-41) even though the service is profile-gated and short-lived.
+      MOCK_EXCHANGE_METRICS_PORT: "9091"
+    ports:
+      # Published, not merely `expose`d: every service in this stack is reachable from the
+      # host, including this one while a run is in flight.
+      - "${MOCK_EXCHANGE_HOST_PORT:-9091}:9091"
+    depends_on:
+      engine:
+        condition: service_healthy
+      win-notifier:
+        condition: service_healthy
+
+  # ===========================================================================
+  # Toolchain services (profile: tools).
+  #
+  # These exist so a clean checkout needs NOTHING installed on the host but Docker:
+  # no rustup, no cargo, no python, no uv. They are profile-gated, so `docker compose up`
+  # and `make demo` never start them, and they mount the repo read-write so an edit on the
+  # host is picked up on the next run with no image rebuild.
+  # ===========================================================================
+
+  # Rust toolchain: `make test`, `make fmt`, `make wire-roundtrip`.
+  # The first run compiles the full dependency tree (minutes); `cargotarget` and
+  # `cargoregistry` are named volumes, so every later run reuses that work. Build output
+  # goes to /cargo-target (CARGO_TARGET_DIR in the toolchain stage) and never touches the
+  # host's ./target, which holds host-arch artifacts.
+  rust-tools:
+    build:
+      context: ..
+      dockerfile: deploy/engine.Dockerfile
+      target: toolchain
+    profiles: ["tools"]
+    working_dir: /workspace
+    volumes:
+      - ..:/workspace
+      - cargotarget:/cargo-target
+      - cargoregistry:/usr/local/cargo/registry
+    command: ["cargo", "test", "--workspace"]
+
+  # Python toolchain: `make test`, `make fmt`, `make lint`.
+  #
+  # services/tests/conftest.py starts throwaway Postgres/Redis via testcontainers, so this
+  # container drives the host's Docker daemon through the mounted socket (docker-out-of-
+  # docker). TESTCONTAINERS_HOST_OVERRIDE is required: testcontainers publishes those
+  # throwaway containers on the DAEMON's host, which from in here is host.docker.internal,
+  # not localhost.
+  py-tools:
+    build:
+      context: ..
+      dockerfile: deploy/python.Dockerfile
+      target: dev
+    profiles: ["tools"]
+    working_dir: /workspace/services
+    environment:
+      # Source is reached by path, not by an editable install, so host edits apply with no
+      # rebuild (the image's venv lives at /opt/venv, outside the bind mount).
+      PYTHONPATH: /workspace/services
+      TESTCONTAINERS_HOST_OVERRIDE: host.docker.internal
+      TESTCONTAINERS_RYUK_DISABLED: "true"
+    extra_hosts:
+      # Docker Desktop provides this name already; the mapping is for Linux hosts.
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ..:/workspace
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: ["pytest", "tests"]
+
+  # End-to-end acceptance run against the LIVE stack (`make e2e`), inside the compose
+  # network. It waits on every application service AND the monitoring pair, because
+  # tests/e2e/test_monitoring.py asserts on Prometheus and Grafana — this is the one place
+  # a monitoring failure is allowed to fail something, since asserting on it is the point.
+  #
+  # Running here rather than on the host also fixes a latent bug in the old host-side
+  # invocation: assert_no_overspend.py defaulted to port 5432, but Postgres is published to
+  # the host on 55433, so the host-side gate only ever passed by connecting to some OTHER
+  # local Postgres.
+  e2e:
+    build:
+      context: ..
+      dockerfile: deploy/python.Dockerfile
+      target: dev
+    profiles: ["tools"]
+    working_dir: /workspace
+    env_file: ../.env.example
+    environment:
+      PYTHONPATH: /workspace/services
+      DATABASE_URL: postgres://rtb:rtb@postgres:5432/rtbdsp
+      REDIS_URL: redis://redis:6379/0
+      ENGINE_URL: http://engine:8080
+      CAMPAIGN_APP_URL: http://campaign-app:8000
+      WIN_NOTIFIER_URL: http://win-notifier:8010
+      TOPUP_WORKER_URL: http://topup-worker:8090
+      PROMETHEUS_URL: http://prometheus:9090
+      GRAFANA_URL: http://grafana:3000
+    volumes:
+      - ..:/workspace
+    depends_on:
+      engine:
+        condition: service_healthy
+      campaign-app:
+        condition: service_healthy
+      win-notifier:
+        condition: service_healthy
+      topup-worker:
+        condition: service_healthy
+      prometheus:
+        condition: service_healthy
+      grafana:
+        condition: service_healthy
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        pytest tests/e2e -x
+        python3 scripts/assert_no_overspend.py
+
+volumes:
+  pgdata:
+  redisdata:
+  promdata:
+  grafanadata:
+  cargotarget:
+  cargoregistry:

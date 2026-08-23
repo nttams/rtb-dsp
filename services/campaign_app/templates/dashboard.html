@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<meta http-equiv="refresh" content="2">
+<h1>Dashboard</h1>
+<form method="post" action="/demo/seed">
+  <button type="submit">Seed 100 demo campaigns</button>
+</form>
+<table>
+  <tr>
+    <th>Name</th><th>Bid CPM</th><th>Bids</th><th>Wins</th>
+    <th>Spend</th><th>Reserved</th><th>Remaining</th>
+  </tr>
+  {% for r in rows %}
+  <tr class="{{ 'exhausted' if r.exhausted else '' }}">
+    <td>{{ r.name }}</td>
+    <td>${{ "%.4f"|format(r.bid_cpm) }}</td>
+    <td>{{ r.bids }}</td>
+    <td>{{ r.wins }}</td>
+    <td>${{ "%.4f"|format(r.spend) }}</td>
+    <td>${{ "%.4f"|format(r.reserved) }}</td>
+    <td>${{ "%.4f"|format(r.remaining) }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endblock %}

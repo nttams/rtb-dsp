@@ -1,0 +1,42 @@
+[project]
+name = "rtbdsp-services"
+version = "0.1.0"
+description = "TAM-68 MVP bidding engine — Python services (win-notifier, topup-worker, campaign-app, mock-exchange)"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "jinja2>=3.1",
+    "redis>=5.0",
+    "psycopg[binary,pool]>=3.2",
+    "pydantic>=2.7",
+    "prometheus_client>=0.20",
+    "httpx>=0.27",
+    "python-multipart>=0.0.9",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "testcontainers[postgres,redis]>=4.7",
+    "ruff>=0.6",
+]
+
+[project.scripts]
+win-notifier = "win_notifier.main:run"
+topup-worker = "topup_worker.main:run"
+campaign-app = "campaign_app.main:run"
+mock-exchange = "mock_exchange.main:cli"
+migrate = "rtbdsp_common.migrate:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["rtbdsp_common", "campaign_app", "win_notifier", "topup_worker", "mock_exchange"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests", "../tests/e2e"]

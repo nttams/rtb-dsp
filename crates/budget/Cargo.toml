@@ -1,0 +1,9 @@
+[package]
+name = "budget"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+redis.workspace = true
+anyhow.workspace = true
