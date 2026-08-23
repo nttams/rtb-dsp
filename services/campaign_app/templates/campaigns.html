@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Campaigns{% endblock %}
+{% block content %}
+<h1>Campaigns</h1>
+<p><a href="/campaigns/new">+ New campaign</a></p>
+<table>
+  <tr>
+    <th>Name</th><th>Status</th><th>Bid CPM</th><th>Total budget</th>
+    <th>Countries (in/ex)</th><th>Languages (in/ex)</th><th></th>
+  </tr>
+  {% for c in campaigns %}
+  <tr>
+    <td>{{ c.name }}</td>
+    <td>{{ c.status }}</td>
+    <td>${{ "%.4f"|format(c.bid_cpm_micros / 1000000) }}</td>
+    <td>${{ "%.4f"|format(c.total_budget_micros / 1000000) }}</td>
+    <td>{{ c.include_countries|join(",") }} / {{ c.exclude_countries|join(",") }}</td>
+    <td>{{ c.include_languages|join(",") }} / {{ c.exclude_languages|join(",") }}</td>
+    <td>
+      <a href="/campaigns/{{ c.id }}/edit">edit</a>
+      &middot;
+      <a href="/campaigns/{{ c.id }}/creatives">creatives</a>
+      &middot;
+      <form class="inline" method="post" action="/campaigns/{{ c.id }}/delete">
+        <button type="submit">delete</button>
+      </form>
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% endblock %}

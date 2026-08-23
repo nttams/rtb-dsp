@@ -1,0 +1,22 @@
+{
+  "cur": "USD",
+  "id": "resp-ext",
+  "seatbid": [
+    {
+      "bid": [
+        {
+          "cid": "42",
+          "crid": "77",
+          "ext": {
+            "cluster": "us-east",
+            "reservation_id": "resv-abc-123"
+          },
+          "id": "bid-1",
+          "impid": "1",
+          "price": 2.5
+        }
+      ],
+      "group": 0
+    }
+  ]
+}

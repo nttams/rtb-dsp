@@ -1,0 +1,193 @@
+{
+  "id": null,
+  "uid": "rtb-overview",
+  "title": "RTB DSP Overview",
+  "description": "AC-43: bid funnel, no-bid reasons over time, spend rate, budget-exhausted campaign count, and topup-worker freshness. Business counters (bids/wins/losses/nobid/expired/clamped) are sourced from the same Redis stats hashes the campaign dashboard reads (AC-44), so this board and the campaign dashboard cannot disagree.",
+  "tags": ["rtb-dsp", "demo"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": { "from": "now-15m", "to": "now" },
+  "editable": true,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Bid funnel: requests → bids → wins",
+      "description": "AC-43: requests received, bids returned, and wins over time.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus-rtbdsp" },
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "custom": { "drawStyle": "line", "fillOpacity": 10 } },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["last", "max"] } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus-rtbdsp" },
+          "expr": "sum(rate(rtbdsp_bid_requests_total[1m]))",
+          "legendFormat": "requests"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus-rtbdsp" },
+          "expr": "sum(rate(rtbdsp_bids_returned_total[1m]))",
+          "legendFormat": "bids"
+        },
+        {
+          "refId": "C",
+          "datasource": { "type": "prometheus", "uid": "prometheus-rtbdsp" },
+          "expr": "sum(rate(rtbdsp_wins_total[1m]))",
+          "legendFormat": "wins"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "No-bid reasons over time",
+      "description": "AC-39/AC-43: no-bid reason breakdown — no_match, below_floor, no_budget, bad_request.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus-rtbdsp" },
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "custom": { "drawStyle": "bars", "stacking": { "mode": "normal" }, "fillOpacity": 60 } },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["last", "sum"] } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus-rtbdsp" },
+          "expr": "sum by (reason) (rate(rtbdsp_nobid_total[1m]))",
+          "legendFormat": "{{reason}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Spend rate",
+      "description": "AC-43: confirmed spend per second, summed across campaigns and clusters, from the Redis stats hash-sourced counter.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus-rtbdsp" },
+      "fieldConfig": {
+        "defaults": { "unit": "currencyUSD", "custom": { "drawStyle": "line", "fillOpacity": 15 } },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "calcs": ["last"] } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus-rtbdsp" },
+          "expr": "sum(rate(rtbdsp_spend_micros_total[1m])) / 1000000",
+          "legendFormat": "spend/sec"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Budget-exhausted campaigns",
+      "description": "AC-36/AC-43: campaigns where reserved + spent >= allocated, i.e. no longer able to bid.",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus-rtbdsp" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [
+          { "color": "green", "value": null },
+          { "color": "yellow", "value": 1 },
+          { "color": "orange", "value": 10 }
+        ] } },
+        "overrides": []
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "graphMode": "area", "textMode": "value_and_name" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus-rtbdsp" },
+          "expr": "rtbdsp_budget_exhausted_campaigns",
+          "legendFormat": "exhausted"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Topup-worker freshness",
+      "description": "R21: seconds since the topup worker's last successful topup pass. Rising steadily means the worker is dead — this is exactly the failure that otherwise looks like a filter bug.",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus-rtbdsp" },
+      "fieldConfig": {
+        "defaults": { "unit": "s", "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [
+          { "color": "green", "value": null },
+          { "color": "yellow", "value": 15 },
+          { "color": "red", "value": 30 }
+        ] } },
+        "overrides": []
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "graphMode": "none", "textMode": "value_and_name" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus-rtbdsp" },
+          "expr": "time() - rtbdsp_topup_last_success_timestamp_seconds",
+          "legendFormat": "seconds since last topup"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Reclaim-sweep freshness",
+      "description": "Seconds since the topup worker's last successful expiry-reclaim pass.",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "prometheus-rtbdsp" },
+      "fieldConfig": {
+        "defaults": { "unit": "s", "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [
+          { "color": "green", "value": null },
+          { "color": "yellow", "value": 5 },
+          { "color": "red", "value": 10 }
+        ] } },
+        "overrides": []
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "graphMode": "none", "textMode": "value_and_name" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus-rtbdsp" },
+          "expr": "time() - rtbdsp_reclaim_last_success_timestamp_seconds",
+          "legendFormat": "seconds since last reclaim"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Bid-path latency (p50 / p95)",
+      "description": "AC-39: engine bid-path latency histogram. Observability only — no latency target gates acceptance.",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "prometheus-rtbdsp" },
+      "fieldConfig": {
+        "defaults": { "unit": "s", "custom": { "drawStyle": "line", "fillOpacity": 10 } },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus-rtbdsp" },
+          "expr": "histogram_quantile(0.50, sum(rate(rtbdsp_bid_latency_seconds_bucket[1m])) by (le))",
+          "legendFormat": "p50"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus-rtbdsp" },
+          "expr": "histogram_quantile(0.95, sum(rate(rtbdsp_bid_latency_seconds_bucket[1m])) by (le))",
+          "legendFormat": "p95"
+        }
+      ]
+    }
+  ]
+}

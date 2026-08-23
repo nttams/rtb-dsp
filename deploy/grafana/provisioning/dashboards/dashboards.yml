@@ -1,0 +1,14 @@
+# AC-42/AC-43: auto-provisions rtb-overview.json on first boot — no manual import.
+apiVersion: 1
+
+providers:
+  - name: rtb-dsp
+    orgId: 1
+    folder: ""
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 10
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards
+      foldersFromFilesStructure: false

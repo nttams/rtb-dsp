@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}{% if creative %}Edit creative{% else %}New creative{% endif %}{% endblock %}
+{% block content %}
+<h1>{% if creative %}Edit creative{% else %}New creative{% endif %} for {{ campaign.name }}</h1>
+{% if error %}<p><strong>{{ error }}</strong></p>{% endif %}
+<form method="post" action="{% if creative %}/campaigns/{{ campaign.id }}/creatives/{{ creative.id }}{% else %}/campaigns/{{ campaign.id }}/creatives{% endif %}">
+  <label for="name">Name</label>
+  <input id="name" type="text" name="name" value="{{ creative.name if creative else '' }}" required>
+
+  <label for="ad_type">Ad type</label>
+  <select id="ad_type" name="ad_type">
+    {% for t in ["banner", "video", "native"] %}
+    <option value="{{ t }}" {% if creative and creative.ad_type == t %}selected{% endif %}>{{ t }}</option>
+    {% endfor %}
+  </select>
+
+  <label for="width">Width (0 = wildcard)</label>
+  <input id="width" type="text" name="width" value="{{ creative.width if creative is not none else 0 }}" required>
+
+  <label for="height">Height (0 = wildcard)</label>
+  <input id="height" type="text" name="height" value="{{ creative.height if creative is not none else 0 }}" required>
+
+  <label for="include_countries">Include countries (narrows the campaign; empty = no narrowing)</label>
+  <input id="include_countries" type="text" name="include_countries" value="{{ creative.include_countries|join(',') if creative else '' }}">
+
+  <label for="include_languages">Include languages (narrows the campaign; empty = no narrowing)</label>
+  <input id="include_languages" type="text" name="include_languages" value="{{ creative.include_languages|join(',') if creative else '' }}">
+
+  <div class="actions">
+    <button type="submit">Save</button>
+  </div>
+</form>
+{% endblock %}
