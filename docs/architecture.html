@@ -1,0 +1,454 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>rtb-dsp Architecture</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+Condensed:wght@600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: one operator's console — flow tabs on top, the live diagram left, a narrated step list right. */
+:root {
+  --bg: #f4f6f8;
+  --surface: #ffffff;
+  --surface-2: #eaeef3;
+  --fg: #141922;
+  --muted: #5b6574;
+  --line: #c3cad4;
+  --bid: #1f5fd6;
+  --win: #16803c;
+  --budget: #b45309;
+  --config: #7a3fd8;
+  --mon: #0b7489;
+  --font-display: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0d1117; --surface: #151b23; --surface-2: #1c2430; --fg: #e5e9ef; --muted: #98a2b1; --line: #313b49;
+    --bid: #6ea8ff; --win: #4fd27f; --budget: #f2b134; --config: #b393ff; --mon: #3cc8e0;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0d1117; --surface: #151b23; --surface-2: #1c2430; --fg: #e5e9ef; --muted: #98a2b1; --line: #313b49;
+  --bid: #6ea8ff; --win: #4fd27f; --budget: #f2b134; --config: #b393ff; --mon: #3cc8e0;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--fg);
+  font-family: var(--font-body); font-size: 15px; line-height: 1.5;
+}
+.wrap {
+  max-width: 1320px; margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 28px 40px;
+  display: grid; gap: 20px;
+}
+header { display: grid; gap: 6px; }
+.eyebrow { font: 600 12px/1 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+h1 { font: 600 clamp(26px, 4vw, 36px)/1.1 var(--font-display); margin: 0; text-wrap: balance; letter-spacing: -.01em; }
+.lede { margin: 0; color: var(--muted); max-width: 72ch; }
+code, .mono { font-family: var(--font-mono); font-size: .9em; }
+
+.tabs { display: flex; flex-wrap: wrap; gap: 8px; }
+.tab {
+  font: 500 14px/1 var(--font-body); color: var(--fg);
+  background: var(--surface); border: 1px solid var(--line); border-radius: 999px;
+  padding: 9px 14px; cursor: pointer; display: inline-flex; align-items: center; gap: 8px;
+}
+.tab:hover { border-color: var(--muted); }
+.tab[aria-selected="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.tab:focus-visible, button:focus-visible, .node:focus-visible { outline: 2px solid var(--bid); outline-offset: 2px; }
+.swatch { width: 10px; height: 10px; border-radius: 50%; background: var(--c, var(--muted)); flex: none; }
+
+.console { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 20px; align-items: start; }
+@media (max-width: 960px) { .console { grid-template-columns: minmax(0, 1fr); } }
+
+.stage { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow-x: auto; min-width: 0; }
+.stage svg { display: block; width: 100%; min-width: 720px; height: auto; }
+
+.panel { display: grid; gap: 14px; min-width: 0; }
+.panel h2 { font: 600 20px/1.2 var(--font-display); margin: 0; display: flex; align-items: center; gap: 10px; }
+.panel p { margin: 0; }
+.muted { color: var(--muted); }
+.controls { display: flex; gap: 8px; flex-wrap: wrap; }
+.btn {
+  font: 500 13px/1 var(--font-body); color: var(--fg); background: var(--surface);
+  border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; cursor: pointer;
+}
+.btn:hover { border-color: var(--muted); }
+.btn[disabled] { opacity: .45; cursor: default; }
+
+ol.steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; counter-reset: s; }
+ol.steps li {
+  counter-increment: s; display: grid; grid-template-columns: 26px 1fr; gap: 10px;
+  padding: 10px 12px; border-radius: 8px; border: 1px solid transparent; cursor: pointer; font-size: 14px;
+}
+ol.steps li::before {
+  content: counter(s); font: 600 12px/26px var(--font-mono); text-align: center;
+  width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--line); color: var(--muted);
+}
+ol.steps li:hover { background: var(--surface); }
+ol.steps li.on { background: var(--surface); border-color: var(--line); }
+ol.steps li.on::before { background: var(--c); border-color: var(--c); color: var(--surface); }
+
+.legend { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.legend button {
+  width: 100%; text-align: left; display: grid; grid-template-columns: 10px 1fr; gap: 12px; align-items: start;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
+  font: inherit; font-size: 14px; color: var(--fg); cursor: pointer;
+}
+.legend button:hover { border-color: var(--muted); }
+.legend .swatch { margin-top: 6px; }
+.legend strong { font-weight: 600; }
+
+dl.facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 0; font-size: 14px; }
+dl.facts dt { color: var(--muted); }
+dl.facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+ul.points { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 14px; }
+
+.invariant {
+  display: flex; flex-wrap: wrap; gap: 10px 28px; align-items: baseline;
+  border-top: 1px solid var(--line); padding-top: 14px; font-size: 14px; color: var(--muted);
+}
+.invariant b { color: var(--fg); font: 600 15px var(--font-mono); }
+
+/* SVG */
+.edge { fill: none; stroke: var(--c); stroke-width: 1.8; transition: opacity .25s, stroke-width .25s; }
+.edge.dash { stroke-dasharray: 5 4; }
+.edge.live { stroke-width: 3; }
+.elabel {
+  font: 500 11.5px var(--font-mono); fill: var(--c); text-anchor: middle; dominant-baseline: middle;
+  paint-order: stroke; stroke: var(--surface); stroke-width: 5px; stroke-linejoin: round; transition: opacity .25s;
+}
+.node { cursor: pointer; transition: opacity .25s; }
+.node rect.box { fill: var(--surface); stroke: var(--fg); stroke-width: 1.3; transition: stroke-width .2s; }
+.node.store rect.box { fill: var(--surface-2); }
+.node.store line.cap { stroke: var(--fg); stroke-width: 1; opacity: .5; }
+.node:hover rect.box, .node.sel rect.box { stroke-width: 2.4; }
+.node.pulse rect.box { stroke: var(--c); stroke-width: 3; }
+.node .kind { font: 600 10px var(--font-mono); letter-spacing: .08em; fill: var(--muted); }
+.node .name { font: 600 15px var(--font-mono); fill: var(--fg); }
+.node .sub { font: 400 12px var(--font-body); fill: var(--muted); }
+.dim { opacity: .14; }
+.node.dim { opacity: .32; }
+.dot { fill: var(--c); }
+@media (prefers-reduced-motion: reduce) { .edge, .elabel, .node { transition: none; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <span class="eyebrow">rtb-dsp · system map</span>
+    <h1>How a bid request becomes spend</h1>
+    <p class="lede">Nine services from one <code>docker compose</code> file. Pick a flow to watch it step through the system, or click any box for its role, port and source path.</p>
+  </header>
+
+  <nav class="tabs" role="tablist" aria-label="Flows" id="tabs"></nav>
+
+  <section class="console">
+    <div class="stage"><svg id="diagram" viewBox="0 0 1040 740" role="img" aria-label="rtb-dsp architecture diagram"></svg></div>
+    <aside class="panel" id="panel" aria-live="polite"></aside>
+  </section>
+
+  <footer class="invariant">
+    <span>Money invariant, enforced in Lua: <b>reserved + spent ≤ allocated</b></span>
+    <span>Units: integer micro-dollars (1e-6 USD) end to end</span>
+    <span>Demo load: <span class="mono">200 rps × 90 s = 18,000 requests</span></span>
+  </footer>
+</div>
+
+<script>
+const NODES = {
+  exchange: { x: 130, y: 90, name: "mock-exchange", kind: "PYTHON", sub: "load gen · auction",
+    title: "Python · demo profile", port: "9091 (metrics, only while running)", code: "services/mock_exchange/",
+    about: "Generates randomized OpenRTB 2.5 requests, runs a simulated second-price auction on each bid, and reports the outcome.",
+    points: ["Started separately with <code>make exchange</code>; defaults to 200 rps for 90 s.",
+      "Posts <code>/win</code> with the clearing price, or <code>/loss</code>, to win-notifier.",
+      "Drops a share of losses silently so reservation expiry gets exercised.",
+      "Not scraped by Prometheus, because it only exists during a run."] },
+  engine: { x: 470, y: 90, name: "engine", kind: "RUST · AXUM", sub: "filter → price → reserve",
+    title: "Rust · axum", port: "8080", code: "crates/engine, filters, budget, configstore, wire",
+    about: "Answers each bid request with at most one bid, after reserving its price in Redis.",
+    points: ["Filters on country, language, ad type and ad size with bitset indexes ported from rtbkit.",
+      "Reserves the per-impression price through <code>reserve.lua</code>; reservations expire after 5 s.",
+      "Returns 200 with one seatbid and one bid, or 204 for no match, below floor or no budget.",
+      "Reloads campaign config from Postgres every 5 s."] },
+  campaign: { x: 900, y: 90, name: "campaign-app", kind: "PYTHON · FASTAPI", sub: "CRUD · seeder · dashboard",
+    title: "Python · FastAPI + Jinja2 (server-rendered)", port: "8000", code: "services/campaign_app/",
+    about: "Campaign and creative CRUD, the 100-campaign seeder, and the live budget dashboard.",
+    points: ["Seeder sizes each budget as <code>impressions_target × bid_cpm / 1000</code> so campaigns can drain inside one 90 s run.",
+      "Dashboard reads Redis in one <code>dashboard_snapshot.lua</code> call joined against Postgres.",
+      "Refreshes every 2 s with a meta refresh; templates contain no script tags."] },
+  notifier: { x: 130, y: 330, name: "win-notifier", kind: "PYTHON · FASTAPI", sub: "POST /win · /loss",
+    title: "Python · FastAPI", port: "8010", code: "services/win_notifier/",
+    about: "Turns auction outcomes into money movements in Redis.",
+    points: ["<code>/win</code> runs <code>settle.lua</code>: reserved moves to spent, clamped to the reserved amount.",
+      "<code>/loss</code> runs <code>release.lua</code>: the reservation returns to available budget.",
+      "Counts clamped settles; a non-zero count points to a CPM vs per-impression unit error."] },
+  redis: { x: 470, y: 330, name: "Redis", kind: "DATASTORE", sub: "hot budget · Lua only", store: true,
+    title: "Datastore", port: "redis://localhost:56379/0", code: "lua/, docs/redis-keys.md",
+    about: "Hot budget store. Every mutation goes through a script in lua/, so each one is atomic.",
+    points: ["<code>c:{cluster}:camp:{id}:budget</code> holds allocated, reserved, spent.",
+      "<code>c:{cluster}:camp:{id}:stats</code> holds bids, wins, losses, nobid_budget, expired, clamped.",
+      "<code>c:{cluster}:resv_index</code> is a ZSET scored by expiry time.",
+      "<code>available = max(0, allocated − reserved − spent)</code> is derived and never stored."] },
+  postgres: { x: 900, y: 330, name: "Postgres", kind: "DATASTORE", sub: "source of truth", store: true,
+    title: "Datastore", port: "postgres://rtb:rtb@localhost:55433/rtbdsp", code: "migrations/",
+    about: "Source of truth for campaigns, creatives and per-cluster budget allocations.",
+    points: ["Money columns are <code>BIGINT</code> micro-dollars.",
+      "Schema lives in <code>0001_init.sql</code> and <code>0002_seed_cluster.sql</code>.",
+      "Uses host port 55433 so it never collides with a local 5432."] },
+  topup: { x: 690, y: 520, name: "topup-worker", kind: "PYTHON", sub: "Postgres ⇄ Redis sync",
+    title: "Python", port: "8090 (/healthz, /metrics)", code: "services/topup_worker/",
+    about: "Keeps each cluster's Redis budget state in sync with Postgres. Health fails when any loop's last success is older than 3 intervals.",
+    points: ["Every 5 s, <code>topup.lua</code> sets allocated, floored at reserved + spent, then <code>reap_deleted.lua</code> runs.",
+      "Every 1 s, <code>reclaim_expired.lua</code> sweeps expired reservations from the ZSET.",
+      "Every 30 s, Postgres spent is set to <code>GREATEST(pg, redis)</code>."] },
+  prometheus: { x: 230, y: 650, name: "Prometheus", kind: "MONITORING", sub: "scrape · 5 s",
+    title: "Monitoring", port: "9090", code: "deploy/prometheus/prometheus.yml",
+    about: "Scrapes engine, campaign-app, win-notifier and topup-worker every 5 s.",
+    points: ["Not a startup dependency of any application service, so a monitoring failure cannot block the demo.",
+      "Every target should report <code>up == 1</code> while the stack runs."] },
+  grafana: { x: 520, y: 650, name: "Grafana", kind: "MONITORING", sub: "RTB Overview board",
+    title: "Monitoring", port: "3000 · admin / rtbdsp", code: "deploy/grafana/provisioning/",
+    about: "Auto-provisioned RTB Overview dashboard (uid rtb-overview).",
+    points: ["Panels: bid funnel, no-bid reasons over time, spend rate, exhausted campaigns, topup freshness.",
+      "Business counters come from the same Redis stats hashes the campaign dashboard reads, so the two views agree."] },
+};
+
+const EDGES = {
+  bid_req:   { flow: "bid", d: "M228,78 L372,78", label: "POST /openrtb2/bid", lx: 300, ly: 64 },
+  bid_resp:  { flow: "bid", d: "M372,104 L228,104", label: "bid · 204 no-bid", lx: 300, ly: 120 },
+  reserve:   { flow: "bid", d: "M470,128 L470,292", label: "reserve.lua", lx: 470, ly: 210 },
+  winloss:   { flow: "win", d: "M130,128 L130,292", label: "POST /win · /loss", lx: 130, ly: 210 },
+  settle:    { flow: "win", d: "M228,330 L372,330", label: "settle · release.lua", lx: 300, ly: 316 },
+  crud:      { flow: "config", d: "M900,128 L900,292", label: "CRUD · seed", lx: 900, ly: 210 },
+  config:    { flow: "config", d: "M802,300 C690,300 680,100 568,100", label: "config reload · 5 s", lx: 685, ly: 200 },
+  snapshot:  { flow: "config", d: "M830,128 C830,250 650,345 568,345", label: "dashboard_snapshot.lua", lx: 690, ly: 318 },
+  alloc:     { flow: "budget", d: "M870,368 C870,450 850,505 788,505", label: "allocations · 5 s", lx: 790, ly: 446 },
+  topup:     { flow: "budget", d: "M592,512 C530,512 510,440 510,368", label: "topup · reclaim_expired.lua", lx: 566, ly: 428 },
+  reconcile: { flow: "budget", d: "M788,540 C900,540 935,470 935,368", label: "reconcile · 30 s", lx: 952, ly: 482 },
+  scr_notifier: { flow: "mon", dash: true, d: "M190,612 C180,520 130,440 130,368" },
+  scr_engine:   { flow: "mon", dash: true, d: "M262,612 C300,520 300,200 372,118", label: "scrape /metrics", lx: 300, ly: 470 },
+  scr_topup:    { flow: "mon", dash: true, d: "M300,612 C380,560 520,540 592,540" },
+  scr_campaign: { flow: "mon", dash: true, d: "M230,688 C230,728 1025,728 1025,520 L1025,140 C1025,110 1012,100 998,100" },
+  promql:       { flow: "mon", d: "M422,650 L328,650", label: "PromQL", lx: 375, ly: 636 },
+};
+
+const FLOWS = {
+  bid: { name: "Bid path", blurb: "One OpenRTB request, answered in a single round trip.", steps: [
+    { e: ["bid_req"], t: "The mock exchange POSTs an OpenRTB 2.5 bid request to the engine." },
+    { n: "engine", t: "The engine filters campaigns on country, language, ad type and ad size, then prices the survivors." },
+    { e: ["reserve"], t: "reserve.lua atomically reserves the per-impression price, or refuses when the campaign is out of budget." },
+    { e: ["bid_resp"], t: "The engine answers with one bid, or 204 when nothing matched or no budget was left." } ] },
+  win: { name: "Win and loss", blurb: "Auction outcomes settle or release each reservation.", steps: [
+    { e: ["winloss"], t: "The exchange runs a second-price auction and POSTs /win with the clearing price, or /loss." },
+    { e: ["settle"], t: "win-notifier runs settle.lua (reserved becomes spent) or release.lua (reserved returns to the budget)." },
+    { e: ["topup"], n: "topup", t: "Losses the exchange never reports expire after 5 s. reclaim_expired.lua sweeps them back every second." } ] },
+  budget: { name: "Budget sync", blurb: "Postgres owns the budget; Redis holds the live copy.", steps: [
+    { e: ["alloc"], t: "topup-worker reads each campaign's allocation and spend from Postgres every 5 s." },
+    { e: ["topup"], t: "topup.lua sets allocated in Redis, floored at reserved + spent; reap_deleted.lua drops removed campaigns." },
+    { e: ["reconcile"], t: "Every 30 s Postgres spent becomes GREATEST(pg, redis), so a Redis flush cannot erase spend." } ] },
+  config: { name: "Config and dashboard", blurb: "Operators edit campaigns; the engine and dashboard pick them up.", steps: [
+    { e: ["crud"], t: "campaign-app writes campaigns, creatives and budget allocations to Postgres. Seed creates 100." },
+    { e: ["config"], t: "The engine reloads campaign config every 5 s and rebuilds its filter indexes." },
+    { e: ["snapshot"], t: "The dashboard reads every budget and stats hash in one dashboard_snapshot.lua call and refreshes every 2 s." } ] },
+  mon: { name: "Monitoring", blurb: "An operator's view of the same run.", steps: [
+    { e: ["scr_engine", "scr_notifier", "scr_topup", "scr_campaign"], t: "Prometheus scrapes /metrics on engine, campaign-app, win-notifier and topup-worker every 5 s." },
+    { e: ["promql"], t: "Grafana's provisioned RTB Overview dashboard queries Prometheus." } ] },
+};
+
+const SVGNS = "http://www.w3.org/2000/svg";
+const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const svg = document.getElementById("diagram");
+const panel = document.getElementById("panel");
+const tabs = document.getElementById("tabs");
+const W = 196, H = 76;
+const state = { flow: "overview", step: 0, playing: !reduceMotion, node: null };
+let timer = null, raf = null;
+
+function el(tag, attrs = {}, parent) {
+  const n = document.createElementNS(SVGNS, tag);
+  for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+  if (parent) parent.appendChild(n);
+  return n;
+}
+const flowColor = f => `var(--${f})`;
+
+// Arrowheads, one per flow so they take the flow's color.
+const defs = el("defs", {}, svg);
+for (const f of Object.keys(FLOWS)) {
+  const m = el("marker", { id: "arrow-" + f, viewBox: "0 0 10 10", refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: "auto-start-reverse" }, defs);
+  el("path", { d: "M0,0 L10,5 L0,10 z", style: `fill:${flowColor(f)}` }, m);
+}
+
+const edgeLayer = el("g", {}, svg);
+const nodeLayer = el("g", {}, svg);
+const labelLayer = el("g", {}, svg);
+const dotLayer = el("g", {}, svg);
+
+for (const [id, e] of Object.entries(EDGES)) {
+  e.path = el("path", { d: e.d, class: "edge" + (e.dash ? " dash" : ""), style: `--c:${flowColor(e.flow)}`, "marker-end": `url(#arrow-${e.flow})` }, edgeLayer);
+  if (e.label) {
+    e.text = el("text", { x: e.lx, y: e.ly, class: "elabel", style: `--c:${flowColor(e.flow)}` }, labelLayer);
+    e.text.textContent = e.label;
+  }
+}
+
+for (const [id, n] of Object.entries(NODES)) {
+  const g = el("g", { class: "node" + (n.store ? " store" : ""), tabindex: 0, role: "button", "aria-label": `${n.name} details` }, nodeLayer);
+  el("rect", { class: "box", x: n.x - W / 2, y: n.y - H / 2, width: W, height: H, rx: 7 }, g);
+  if (n.store) el("line", { class: "cap", x1: n.x - W / 2 + 8, x2: n.x + W / 2 - 8, y1: n.y - H / 2 + 6, y2: n.y - H / 2 + 6 }, g);
+  const tx = n.x - W / 2 + 14;
+  el("text", { x: tx, y: n.y - 14, class: "kind" }, g).textContent = n.kind;
+  el("text", { x: tx, y: n.y + 6, class: "name" }, g).textContent = n.name;
+  el("text", { x: tx, y: n.y + 24, class: "sub" }, g).textContent = n.sub;
+  g.addEventListener("click", () => showNode(id));
+  g.addEventListener("keydown", ev => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); showNode(id); } });
+  n.g = g;
+}
+
+function nodesOfFlow(f) {
+  const set = new Set();
+  const ends = (d) => {
+    const nums = d.match(/-?\d+(\.\d+)?/g).map(Number);
+    return [[nums[0], nums[1]], [nums[nums.length - 2], nums[nums.length - 1]]];
+  };
+  for (const e of Object.values(EDGES)) {
+    if (e.flow !== f) continue;
+    for (const [px, py] of ends(e.d)) {
+      for (const [id, n] of Object.entries(NODES)) {
+        if (Math.abs(px - n.x) <= W / 2 + 2 && Math.abs(py - n.y) <= H / 2 + 2) set.add(id);
+      }
+    }
+  }
+  return set;
+}
+
+function stopAnim() {
+  clearTimeout(timer); cancelAnimationFrame(raf);
+  dotLayer.replaceChildren();
+}
+
+function paint() {
+  const f = state.flow, step = f !== "overview" ? FLOWS[f].steps[state.step] : null;
+  const involved = f !== "overview" ? nodesOfFlow(f) : null;
+  for (const [id, e] of Object.entries(EDGES)) {
+    const live = !!(step && step.e && step.e.includes(id));
+    const inFlow = f === "overview" || e.flow === f || live;
+    e.path.classList.toggle("dim", !inFlow);
+    e.path.classList.toggle("live", live);
+    if (e.text) e.text.classList.toggle("dim", !inFlow);
+  }
+  for (const [id, n] of Object.entries(NODES)) {
+    n.g.classList.toggle("dim", !!involved && !involved.has(id) && step?.n !== id);
+    n.g.classList.toggle("pulse", step?.n === id);
+    n.g.classList.toggle("sel", state.node === id);
+    if (step?.n === id) n.g.style.setProperty("--c", flowColor(f));
+  }
+}
+
+function animateStep() {
+  stopAnim();
+  paint();
+  renderPanel();
+  if (state.flow === "overview" || !state.playing) return;
+  const flow = FLOWS[state.flow], step = flow.steps[state.step];
+  const next = () => {
+    const last = state.step === flow.steps.length - 1;
+    timer = setTimeout(() => { state.step = last ? 0 : state.step + 1; animateStep(); }, last ? 1600 : 700);
+  };
+  if (!step.e) { timer = setTimeout(next, 1100); return; }
+  const dots = step.e.map(id => {
+    const p = EDGES[id].path;
+    return { p, len: p.getTotalLength(), c: el("circle", { r: 5.5, class: "dot", style: `--c:${flowColor(state.flow)}` }, dotLayer) };
+  });
+  const dur = 1300, t0 = performance.now();
+  const tick = now => {
+    const k = Math.min(1, (now - t0) / dur), ease = k < .5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+    for (const d of dots) {
+      const pt = d.p.getPointAtLength(d.len * ease);
+      d.c.setAttribute("cx", pt.x); d.c.setAttribute("cy", pt.y);
+    }
+    if (k < 1) raf = requestAnimationFrame(tick);
+    else { dotLayer.replaceChildren(); next(); }
+  };
+  raf = requestAnimationFrame(tick);
+}
+
+function renderTabs() {
+  const items = [["overview", "All flows", null], ...Object.entries(FLOWS).map(([k, v]) => [k, v.name, k])];
+  tabs.replaceChildren(...items.map(([k, label, c]) => {
+    const b = document.createElement("button");
+    b.className = "tab"; b.type = "button"; b.setAttribute("role", "tab");
+    b.setAttribute("aria-selected", String(state.flow === k && !state.node));
+    b.innerHTML = (c ? `<span class="swatch" style="--c:${flowColor(c)}"></span>` : "") + label;
+    b.addEventListener("click", () => selectFlow(k));
+    return b;
+  }));
+}
+
+function renderPanel() {
+  renderTabs();
+  if (state.node) {
+    const n = NODES[state.node];
+    panel.innerHTML = `
+      <span class="eyebrow">${n.title}</span>
+      <h2><span class="mono">${n.name}</span></h2>
+      <p>${n.about}</p>
+      <dl class="facts"><dt>Host</dt><dd class="mono">${n.port}</dd><dt>Source</dt><dd class="mono">${n.code}</dd></dl>
+      <ul class="points">${n.points.map(p => `<li>${p}</li>`).join("")}</ul>
+      <div class="controls"><button class="btn" type="button" id="back">Back to ${state.flow === "overview" ? "all flows" : FLOWS[state.flow].name}</button></div>`;
+    panel.querySelector("#back").addEventListener("click", closeNode);
+    return;
+  }
+  if (state.flow === "overview") {
+    panel.innerHTML = `
+      <span class="eyebrow">Five flows</span>
+      <h2>Pick a flow to play it</h2>
+      <ul class="legend">${Object.entries(FLOWS).map(([k, f]) =>
+        `<li><button type="button" data-flow="${k}"><span class="swatch" style="--c:${flowColor(k)}"></span><span><strong>${f.name}</strong><br><span class="muted">${f.blurb}</span></span></button></li>`).join("")}</ul>
+      <p class="muted">Click any box for its port, source path and responsibilities.</p>`;
+    panel.querySelectorAll("[data-flow]").forEach(b => b.addEventListener("click", () => selectFlow(b.dataset.flow)));
+    return;
+  }
+  const f = FLOWS[state.flow];
+  panel.innerHTML = `
+    <span class="eyebrow">Flow · step ${state.step + 1} of ${f.steps.length}</span>
+    <h2><span class="swatch" style="--c:${flowColor(state.flow)}"></span>${f.name}</h2>
+    <p class="muted">${f.blurb}</p>
+    <ol class="steps" style="--c:${flowColor(state.flow)}">${f.steps.map((s, i) => `<li data-i="${i}" class="${i === state.step ? "on" : ""}">${s.t}</li>`).join("")}</ol>
+    <div class="controls">
+      <button class="btn" type="button" id="prev">Previous</button>
+      <button class="btn" type="button" id="play">${state.playing ? "Pause" : "Play"}</button>
+      <button class="btn" type="button" id="next">Next</button>
+    </div>`;
+  panel.querySelectorAll("[data-i]").forEach(li => li.addEventListener("click", () => { state.step = +li.dataset.i; state.playing = false; animateStep(); }));
+  panel.querySelector("#prev").addEventListener("click", () => go(-1));
+  panel.querySelector("#next").addEventListener("click", () => go(1));
+  panel.querySelector("#play").addEventListener("click", () => { state.playing = !state.playing; animateStep(); });
+}
+
+function go(d) {
+  const n = FLOWS[state.flow].steps.length;
+  state.step = (state.step + d + n) % n; state.playing = false; animateStep();
+}
+function selectFlow(k) {
+  state.flow = k; state.step = 0; state.node = null; state.playing = !reduceMotion;
+  try { history.replaceState(null, "", k === "overview" ? location.pathname : "#" + k); } catch (_) {}
+  animateStep();
+}
+function showNode(id) { state.node = id; stopAnim(); paint(); renderPanel(); }
+function closeNode() { state.node = null; animateStep(); }
+document.addEventListener("keydown", ev => { if (ev.key === "Escape" && state.node) closeNode(); });
+
+const initial = location.hash.slice(1);
+selectFlow(FLOWS[initial] ? initial : "overview");
+</script>
+</html>

@@ -13,37 +13,36 @@ This is a legibility-first MVP, not a throughput benchmark (see [Non-goals](#non
 
 ## Architecture
 
-```
-                    ┌──────────────────┐        ┌──────────────────┐
-                    │  campaign-app    │        │  mock-exchange    │
-                    │  (FastAPI, SSR)  │        │  (load generator)  │
-                    │  seed / CRUD /   │        │  POST /openrtb2/  │
-                    │  dashboard       │        │  bid, win/loss     │
-                    └───────┬──────────┘        └─────────┬─────────┘
-                            │  writes                      │ bid request
-                            ▼                               ▼
-                    ┌──────────────────┐        ┌──────────────────┐
-                    │   Postgres        │◄──────┤   engine (Rust)   │
-                    │ campaigns/        │ loads  │ filter → price →  │
-                    │ creatives/        │ config │ reserve via Lua   │
-                    │ budget_allocations│        └─────────┬─────────┘
-                    └───────┬──────────┘                  │ reserve/settle/
-                            │ allocation                    │ release/reclaim
-                            ▼                               ▼
-                    ┌──────────────────┐        ┌──────────────────┐
-                    │  topup-worker     │───────►│      Redis        │
-                    │ PG alloc → Redis  │  Lua   │ budget/stats/resv │
-                    │ reclaim expired   │ (only)  │  (lua/*.lua)      │
-                    └──────────────────┘        └─────────▲─────────┘
-                                                            │ settle/release
-                                                  ┌──────────┴─────────┐
-                                                  │   win-notifier      │
-                                                  │  POST /win, /loss   │
-                                                  └──────────────────────┘
+**Interactive version:** [`docs/architecture.html`](docs/architecture.html) steps through each
+flow with animated requests and per-service details. Open it in a browser locally, or
+[view it rendered](https://htmlpreview.github.io/?https://github.com/nttams/rtb-dsp/blob/main/docs/architecture.html).
 
-              ┌──────────────┐        scrapes every /metrics       ┌──────────┐
-              │  Prometheus   │◄─────────────────────────────────────┤ Grafana  │
-              └──────────────┘                                      └──────────┘
+```mermaid
+flowchart LR
+    exchange["mock-exchange<br/>load gen · auction"]
+    engine["engine (Rust)<br/>filter → price → reserve"]
+    notifier["win-notifier<br/>POST /win · /loss"]
+    campaign["campaign-app<br/>CRUD · seeder · dashboard"]
+    topup["topup-worker<br/>Postgres ⇄ Redis sync"]
+    redis[("Redis<br/>hot budget · Lua only")]
+    postgres[("Postgres<br/>source of truth")]
+    prometheus["Prometheus"]
+    grafana["Grafana"]
+
+    exchange -- "POST /openrtb2/bid" --> engine
+    engine -- "bid · 204 no-bid" --> exchange
+    engine -- "reserve.lua" --> redis
+    exchange -- "POST /win · /loss" --> notifier
+    notifier -- "settle.lua · release.lua" --> redis
+    campaign -- "CRUD · seed" --> postgres
+    postgres -- "config reload · 5s" --> engine
+    campaign -- "dashboard_snapshot.lua" --> redis
+    postgres -- "allocations · 5s" --> topup
+    topup -- "topup.lua · reclaim_expired.lua" --> redis
+    topup -- "reconcile spent · 30s" --> postgres
+    prometheus -. "scrape /metrics · 5s" .-> engine
+    prometheus -.-> campaign & notifier & topup
+    grafana -- "PromQL" --> prometheus
 ```
 
 | Component | Language | Role |
@@ -55,7 +54,7 @@ This is a legibility-first MVP, not a throughput benchmark (see [Non-goals](#non
 | `mock-exchange` | Python | Generates randomized OpenRTB requests, simulates a second-price auction, posts win/loss. |
 | Postgres | — | Source of truth for campaigns, creatives, and per-cluster budget allocations. |
 | Redis | — | Hot budget store: `allocated`/`reserved`/`spent`/stats, mutated only via `lua/*.lua`. |
-| Prometheus + Grafana | — | Scrapes every service's `/metrics`; provisioned `rtb-overview` dashboard. |
+| Prometheus + Grafana | — | Scrapes every long-running service's `/metrics`; provisioned `rtb-overview` dashboard. |
 
 All money is integer **micro-dollars** (1e-6 USD) end to end — Postgres `BIGINT`, Redis
 `HINCRBY`, Rust `i64`, Python `int` — so overspend assertions are exact, never a
@@ -265,8 +264,9 @@ runtime, sampled continuously during `make e2e`.
 ## Monitoring
 
 - **Prometheus:** http://localhost:9090 — scrapes `engine`, `campaign-app`,
-  `win-notifier`, `topup-worker`, and `mock-exchange` `/metrics` endpoints every 5s;
-  scrape config is committed at `deploy/prometheus/prometheus.yml`.
+  `win-notifier` and `topup-worker` `/metrics` endpoints every 5s (`mock-exchange` is
+  deliberately not scraped: it only exists during a run); scrape config is committed at
+  `deploy/prometheus/prometheus.yml`.
 - **Grafana:** http://localhost:3000 — login **`admin`** / **`$GRAFANA_ADMIN_PASSWORD`**
   (default `rtbdsp`, set in `.env.example`). The Prometheus datasource and the
   **RTB Overview** dashboard (`uid: rtb-overview`) are auto-provisioned from
@@ -299,5 +299,6 @@ deploy/          docker-compose.yml (the whole stack AND the containerized Rust/
                  toolchains), Dockerfiles, Prometheus/Grafana provisioning
 scripts/         wait_for_health.sh, assert_no_overspend.py
 tests/           Cross-language OpenRTB fixtures + end-to-end demo assertions
-docs/            redis-keys.md (key contract), rtbkit-port-notes.md (this doc's detail)
+docs/            architecture.html (interactive diagram), redis-keys.md (key contract),
+                 rtbkit-port-notes.md (this doc's detail)
 ```
